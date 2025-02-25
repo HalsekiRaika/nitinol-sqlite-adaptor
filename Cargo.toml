@@ -1,0 +1,14 @@
+[package]
+name = "nitinol-sqlite-adaptor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "^0.1"
+dotenvy = "^0.15"
+sqlx = { version = "^0.8", features = ["sqlite", "migrate", "time"] }
+
+[dependencies.nitinol]
+git = "https://github.com/HalsekiRaika/nitinol"
+rev = "2cb8f29a42605119d62e41030fbf62793ef4481f"
+features = ["protocol-sqlx"]
