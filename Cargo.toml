@@ -11,5 +11,5 @@ sqlx = { version = "^0.8", features = ["sqlite", "migrate", "time"] }
 
 [dependencies.nitinol]
 git = "https://github.com/HalsekiRaika/nitinol"
-rev = "2cb8f29a42605119d62e41030fbf62793ef4481f"
+tag = "v0.3.0-beta.1"
 features = ["protocol-sqlx"]
