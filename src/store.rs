@@ -2,12 +2,13 @@ use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::time::Duration;
 use async_trait::async_trait;
-use nitinol::EntityId;
-use nitinol::errors::ProtocolError;
-use nitinol::protocol::io::{Reader, Writer};
-use nitinol::protocol::Payload;
+use nitinol_core::identifier::EntityId;
+use nitinol_protocol::errors::ProtocolError;
+use nitinol_protocol::io::{Reader, Writer};
+use nitinol_protocol::Payload;
 use sqlx::{Pool, Sqlite, SqliteConnection};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use tracing::Instrument;
 
 pub struct SqliteEventStore {
     pool: Pool<Sqlite>
@@ -37,17 +38,19 @@ impl SqliteEventStore {
                     .unwrap_or(Duration::from_millis(5000))
             )
             .max_connections(
-                dotenvy::var("NITINOL_MAX_JOURNAL_CONNECTION")
+                dotenvy::var("NITINOL_JOURNAL_MAX_CONNECTION")
                     .ok()
                     .and_then(|max| max.parse::<u32>().ok())
                     .unwrap_or(8)
             )
             .connect_with(opts)
+            .instrument(tracing::trace_span!("connect-eventstore"))
             .await
             .map_err(|e| ProtocolError::Setup(Box::new(e)))?;
         
         sqlx::migrate!("./migrations")
             .run(&pool)
+            .instrument(tracing::trace_span!("migrate-eventstore"))
             .await
             .map_err(|e| ProtocolError::Write(Box::new(e)))?;
         
@@ -58,10 +61,20 @@ impl SqliteEventStore {
 #[async_trait]
 impl Writer for SqliteEventStore {
     async fn write(&self, aggregate_id: EntityId, payload: Payload) -> Result<(), ProtocolError> {
-        let mut con = self.pool.acquire().await
+        let mut con = self.pool.begin()
+            .instrument(tracing::trace_span!("begin-xact-eventstore"))
+            .await
             .map_err(|e| ProtocolError::Write(Box::new(e)))?;
-        Internal::write(aggregate_id.as_ref(), payload, &mut con).await
+        Internal::write(aggregate_id.as_ref(), payload, &mut con)
+            .instrument(tracing::trace_span!("write-eventstore"))
+            .await
             .map_err(|e| ProtocolError::Write(Box::new(e)))?;
+        
+        if let Err(e) = con.commit().await {
+            tracing::error!("on failure commit caused reason `{e}`");
+            return Err(ProtocolError::Write(Box::new(e)));
+        }
+        
         Ok(())
     }
 }
@@ -71,7 +84,9 @@ impl Reader for SqliteEventStore {
     async fn read(&self, id: EntityId, seq: i64) -> Result<Payload, ProtocolError> {
         let mut con = self.pool.acquire().await
             .map_err(|e| ProtocolError::Read(Box::new(e)))?;
-        let payload = Internal::read(id.as_ref(), seq, &mut con).await
+        let payload = Internal::read(id.as_ref(), seq, &mut con)
+            .instrument(tracing::trace_span!("read-eventstore"))
+            .await
             .map_err(|e| ProtocolError::Read(Box::new(e)))?;
         Ok(payload)
     }
@@ -79,7 +94,9 @@ impl Reader for SqliteEventStore {
     async fn read_to(&self, id: EntityId, from: i64, to: i64) -> Result<BTreeSet<Payload>, ProtocolError> {
         let mut con = self.pool.acquire().await
             .map_err(|e| ProtocolError::Read(Box::new(e)))?;
-        let payload = Internal::read_to(id.as_ref(), from, to, &mut con).await
+        let payload = Internal::read_to(id.as_ref(), from, to, &mut con)
+            .instrument(tracing::trace_span!("read-eventstore"))
+            .await
             .map_err(|e| ProtocolError::Read(Box::new(e)))?;
         Ok(payload)
     }
