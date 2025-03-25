@@ -1,5 +1,6 @@
 [package]
 name = "nitinol-sqlite-adaptor"
+description = "SQLite storage adapter for `nitinol-persistence`."
 version = "0.1.0"
 license = "MIT"
 edition = "2021"
